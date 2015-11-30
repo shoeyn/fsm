@@ -1,9 +1,8 @@
 # Finite State Machine Designer
 
-http://madebyevan.com/fsm/
+Original work: http://madebyevan.com/fsm/
 
+### References
 
-References
-
-Pan and Zoom: http://phrogz.net/tmp/canvas_zoom_to_cursor.html
-Drag and Drop: http://html5demos.com/drag
+1. Pan and Zoom: http://phrogz.net/tmp/canvas_zoom_to_cursor.html
+2. Drag and Drop: http://html5demos.com/drag
