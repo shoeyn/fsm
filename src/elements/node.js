@@ -17,6 +17,7 @@ Node.prototype.setAnchorPoint = function(x, y) {
 	this.y = y + this.mouseOffsetY;
 };
 
+
 Node.prototype.draw = function(c) {
 	// draw the circle
 	c.beginPath();
@@ -33,6 +34,29 @@ Node.prototype.draw = function(c) {
 		c.stroke();
 	}
 };
+
+
+/*
+Node.prototype.draw = function(c) {
+	var stroke = true;
+	var radius = {tl: 5, tr: 5, br: 5, bl: 5};
+	var width = 200;
+	var height = 50;
+	c.beginPath();
+	c.moveTo(this.x + radius.tl, this.y);
+	c.lineTo(this.x + width - radius.tr, this.y);
+	c.quadraticCurveTo(this.x + width, this.y, this.x + width, this.y + radius.tr);
+	c.lineTo(this.x + width, this.y + height - radius.br);
+	c.quadraticCurveTo(this.x + width, this.y + height, this.x + width - radius.br, this.y + height);
+	c.lineTo(this.x + radius.bl, this.y + height);
+	c.quadraticCurveTo(this.x, this.y + height, this.x, this.y + height - radius.bl);
+	c.lineTo(this.x, this.y + radius.tl);
+	c.quadraticCurveTo(this.x, this.y, this.x + radius.tl, this.y);
+	c.closePath();
+	c.stroke();
+	drawText(c, this.text, this.x, this.y, null, selectedObject == this);
+};
+*/
 
 Node.prototype.closestPointOnCircle = function(x, y) {
 	var dx = x - this.x;

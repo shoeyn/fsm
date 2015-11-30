@@ -53,7 +53,7 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
 	x -= width / 2;
 
 	// position the text intelligently if given an angle
-	if(angleOrNull != null) {
+	if(angleOrNull !== null) {
 		var cos = Math.cos(angleOrNull);
 		var sin = Math.sin(angleOrNull);
 		var cornerPointX = (width / 2 + 5) * (cos > 0 ? 1 : -1);
@@ -90,9 +90,14 @@ function resetCaret() {
 }
 
 var canvas;
+var context;
+var scale = 1;
+var originx = 0;
+var originy = 0;
 var nodeRadius = 30;
 var nodes = [];
 var links = [];
+var mouseDown;
 
 var cursorVisible = true;
 var snapToPadding = 6; // pixels
@@ -103,9 +108,10 @@ var movingObject = false;
 var originalClick;
 
 function drawUsing(c) {
-	c.clearRect(0, 0, canvas.width, canvas.height);
+	var p1 = context.transformedPoint(0,0);
+	var p2 = context.transformedPoint(canvas.width,canvas.height);
+	c.clearRect(p1.x,p1.y,p2.x-p1.x,p2.y-p1.y);
 	c.save();
-	c.translate(0.5, 0.5);
 
 	for(var i = 0; i < nodes.length; i++) {
 		c.lineWidth = 1;
@@ -117,7 +123,7 @@ function drawUsing(c) {
 		c.fillStyle = c.strokeStyle = (links[i] == selectedObject) ? 'blue' : 'black';
 		links[i].draw(c);
 	}
-	if(currentLink != null) {
+	if(currentLink !== null) {
 		c.lineWidth = 1;
 		c.fillStyle = c.strokeStyle = 'black';
 		currentLink.draw(c);
@@ -127,7 +133,7 @@ function drawUsing(c) {
 }
 
 function draw() {
-	drawUsing(canvas.getContext('2d'));
+	drawUsing(context);
 	saveBackup();
 }
 
@@ -161,16 +167,18 @@ function snapNode(node) {
 
 window.onload = function() {
 	canvas = document.getElementById('canvas');
+	context = canvas.getContext('2d');
+	trackTransforms(context);
 	restoreBackup();
 	draw();
 
 	canvas.onmousedown = function(e) {
-		var mouse = crossBrowserRelativeMousePos(e);
+		var mouse = crossBrowserMousePos(e);
 		selectedObject = selectObject(mouse.x, mouse.y);
 		movingObject = false;
 		originalClick = mouse;
 
-		if(selectedObject != null) {
+		if(selectedObject !== null) {
 			if(shift && selectedObject instanceof Node) {
 				currentLink = new SelfLink(selectedObject, mouse);
 			} else {
@@ -183,6 +191,8 @@ window.onload = function() {
 			resetCaret();
 		} else if(shift) {
 			currentLink = new TemporaryLink(mouse, mouse);
+		} else {
+			mouseDown = true;
 		}
 
 		draw();
@@ -198,10 +208,10 @@ window.onload = function() {
 	};
 
 	canvas.ondblclick = function(e) {
-		var mouse = crossBrowserRelativeMousePos(e);
+		var mouse = crossBrowserMousePos(e);
 		selectedObject = selectObject(mouse.x, mouse.y);
 
-		if(selectedObject == null) {
+		if(selectedObject === null) {
 			selectedObject = new Node(mouse.x, mouse.y);
 			nodes.push(selectedObject);
 			resetCaret();
@@ -213,16 +223,16 @@ window.onload = function() {
 	};
 
 	canvas.onmousemove = function(e) {
-		var mouse = crossBrowserRelativeMousePos(e);
+		var mouse = crossBrowserMousePos(e);
 
-		if(currentLink != null) {
+		if(currentLink !== null) {
 			var targetNode = selectObject(mouse.x, mouse.y);
 			if(!(targetNode instanceof Node)) {
 				targetNode = null;
 			}
 
-			if(selectedObject == null) {
-				if(targetNode != null) {
+			if(selectedObject === null) {
+				if(targetNode !== null) {
 					currentLink = new StartLink(targetNode, originalClick);
 				} else {
 					currentLink = new TemporaryLink(originalClick, mouse);
@@ -230,28 +240,33 @@ window.onload = function() {
 			} else {
 				if(targetNode == selectedObject) {
 					currentLink = new SelfLink(selectedObject, mouse);
-				} else if(targetNode != null) {
+				} else if(targetNode !== null) {
 					currentLink = new Link(selectedObject, targetNode);
 				} else {
 					currentLink = new TemporaryLink(selectedObject.closestPointOnCircle(mouse.x, mouse.y), mouse);
 				}
 			}
 			draw();
-		}
-
-		if(movingObject) {
+		} else if(movingObject) {
 			selectedObject.setAnchorPoint(mouse.x, mouse.y);
 			if(selectedObject instanceof Node) {
 				snapNode(selectedObject);
 			}
 			draw();
+		} else if (mouseDown) {
+			var newX = mouse.x-originalClick.x;
+			var newY = mouse.y-originalClick.y;
+			context.translate(newX,newY);
+			draw();		
 		}
+
 	};
 
 	canvas.onmouseup = function(e) {
 		movingObject = false;
+		mouseDown = false;
 
-		if(currentLink != null) {
+		if(currentLink !== null) {
 			if(!(currentLink instanceof TemporaryLink)) {
 				selectedObject = currentLink;
 				links.push(currentLink);
@@ -261,7 +276,118 @@ window.onload = function() {
 			draw();
 		}
 	};
-}
+
+	var zoom = function(clicks, mouse){
+		context.translate(mouse.x,mouse.y);
+		var factor = Math.pow(1.1,clicks);
+		context.scale(factor,factor);
+		context.translate(-mouse.x,-mouse.y);
+		draw();
+	};
+
+	var handleScroll = function(e){
+		var mouse = crossBrowserMousePos(e);
+		var delta = e.wheelDelta ? e.wheelDelta/40 : e.detail ? -e.detail : 0;
+		var currentScale = context.getTransform().a;
+		if (delta > 0 && currentScale < 5 || delta < 0 && currentScale > 0.2) {
+			zoom(delta, mouse);
+		}
+		return e.preventDefault() && false;
+	};
+	canvas.addEventListener('DOMMouseScroll',handleScroll,false);
+	canvas.addEventListener('mousewheel',handleScroll,false);
+
+	function trackTransforms(context){
+		var svg = document.createElementNS("http://www.w3.org/2000/svg",'svg');
+		var xform = svg.createSVGMatrix();
+		context.getTransform = function(){ return xform; };
+		
+		var savedTransforms = [];
+		var save = context.save;
+		context.save = function(){
+			savedTransforms.push(xform.translate(0,0));
+			return save.call(context);
+		};
+		var restore = context.restore;
+		context.restore = function(){
+			xform = savedTransforms.pop();
+			return restore.call(context);
+		};
+
+		var scale = context.scale;
+		context.scale = function(sx,sy){
+			xform = xform.scaleNonUniform(sx,sy);
+			return scale.call(context,sx,sy);
+		};
+		var rotate = context.rotate;
+		context.rotate = function(radians){
+			xform = xform.rotate(radians*180/Math.PI);
+			return rotate.call(context,radians);
+		};
+		var translate = context.translate;
+		context.translate = function(dx,dy){
+			xform = xform.translate(dx,dy);
+			return translate.call(context,dx,dy);
+		};
+		var transform = context.transform;
+		context.transform = function(a,b,c,d,e,f){
+			var m2 = svg.createSVGMatrix();
+			m2.a=a; m2.b=b; m2.c=c; m2.d=d; m2.e=e; m2.f=f;
+			xform = xform.multiply(m2);
+			return transform.call(context,a,b,c,d,e,f);
+		};
+		var setTransform = context.setTransform;
+		context.setTransform = function(a,b,c,d,e,f){
+			xform.a = a;
+			xform.b = b;
+			xform.c = c;
+			xform.d = d;
+			xform.e = e;
+			xform.f = f;
+			return setTransform.call(context,a,b,c,d,e,f);
+		};
+		var pt  = svg.createSVGPoint();
+		context.transformedPoint = function(x,y){
+			pt.x=x; pt.y=y;
+			return pt.matrixTransform(xform.inverse());
+		};
+	}
+
+	var droppables = document.querySelectorAll('.drop'), el = null;
+	for (var i = 0; i < droppables.length; i++) {
+	    el = droppables[i];
+	    el.setAttribute('draggable', 'true');
+		el.addEventListener('dragstart', function (e) {
+	 		if(currentLink === null) {
+	      		e.dataTransfer.effectAllowed = 'copy'; // only dropEffect='copy' will be dropable
+	      		e.dataTransfer.setData('Text', this.textContent); // required otherwise doesn't work
+	      		return false;
+	      	}
+	    });
+	}
+
+	canvas.addEventListener('dragover', function (e) {
+		if(currentLink === null) {
+	    	if (e.preventDefault) e.preventDefault(); // allows us to drop
+	    	e.dataTransfer.dropEffect = 'copy';
+	    }
+	    return false;
+	});
+
+	canvas.addEventListener('drop', function (e) {
+		if(currentLink === null) {
+	    	if (e.stopPropagation) e.stopPropagation(); // stops the browser from redirecting...why???
+	    	var mouse = crossBrowserMousePos(e);
+			var selectedObject = new Node(mouse.x, mouse.y);
+			selectedObject.text = e.dataTransfer.getData('Text');
+			nodes.push(selectedObject);
+			resetCaret();
+			draw();
+	    }
+	    return false;
+	});
+
+};
 
 var shift = false;
 
@@ -274,7 +400,7 @@ document.onkeydown = function(e) {
 		// don't read keystrokes when other things have focus
 		return true;
 	} else if(key == 8) { // backspace key
-		if(selectedObject != null && 'text' in selectedObject) {
+		if(selectedObject !== null && 'text' in selectedObject) {
 			selectedObject.text = selectedObject.text.substr(0, selectedObject.text.length - 1);
 			resetCaret();
 			draw();
@@ -283,7 +409,7 @@ document.onkeydown = function(e) {
 		// backspace is a shortcut for the back button, but do NOT want to change pages
 		return false;
 	} else if(key == 46) { // delete key
-		if(selectedObject != null) {
+		if(selectedObject !== null) {
 			for(var i = 0; i < nodes.length; i++) {
 				if(nodes[i] == selectedObject) {
 					nodes.splice(i--, 1);
@@ -314,7 +440,7 @@ document.onkeypress = function(e) {
 	if(!canvasHasFocus()) {
 		// don't read keystrokes when other things have focus
 		return true;
-	} else if(key >= 0x20 && key <= 0x7E && !e.metaKey && !e.altKey && !e.ctrlKey && selectedObject != null && 'text' in selectedObject) {
+	} else if(key >= 0x20 && key <= 0x7E && !e.metaKey && !e.altKey && !e.ctrlKey && selectedObject !== null && 'text' in selectedObject) {
 		selectedObject.text += String.fromCharCode(key);
 		resetCaret();
 		draw();
@@ -332,33 +458,10 @@ function crossBrowserKey(e) {
 	return e.which || e.keyCode;
 }
 
-function crossBrowserElementPos(e) {
-	e = e || window.event;
-	var obj = e.target || e.srcElement;
-	var x = 0, y = 0;
-	while(obj.offsetParent) {
-		x += obj.offsetLeft;
-		y += obj.offsetTop;
-		obj = obj.offsetParent;
-	}
-	return { 'x': x, 'y': y };
-}
-
 function crossBrowserMousePos(e) {
-	e = e || window.event;
-	return {
-		'x': e.pageX || e.clientX + document.body.scrollLeft + document.documentElement.scrollLeft,
-		'y': e.pageY || e.clientY + document.body.scrollTop + document.documentElement.scrollTop,
-	};
-}
-
-function crossBrowserRelativeMousePos(e) {
-	var element = crossBrowserElementPos(e);
-	var mouse = crossBrowserMousePos(e);
-	return {
-		'x': mouse.x - element.x,
-		'y': mouse.y - element.y
-	};
+	var mouseX = e.offsetX || (e.pageX - canvas.offsetLeft);
+	var mouseY = e.offsetY || (e.pageY - canvas.offsetTop);
+	return context.transformedPoint(mouseX, mouseY);
 }
 
 function output(text) {
@@ -370,7 +473,7 @@ function output(text) {
 function saveAsPNG() {
 	var oldSelectedObject = selectedObject;
 	selectedObject = null;
-	drawUsing(canvas.getContext('2d'));
+	drawUsing(context);
 	selectedObject = oldSelectedObject;
 	var pngData = canvas.toDataURL('image/png');
 	document.location.href = pngData;
