@@ -1,6 +1,6 @@
 # Finite State Machine Designer
 
-http://madebyevan.com/fsm/
+Original work: http://madebyevan.com/fsm/
 
 ### References
 
