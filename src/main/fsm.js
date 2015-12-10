@@ -44,29 +44,48 @@ function canvasHasFocus() {
 	return (document.activeElement || document.body) == document.body;
 }
 
-function drawText(c, originalText, x, y, angleOrNull, isSelected) {
+function drawText(c, originalText, x, y, angleOrNull, isSelected, boxObject) {
+	// draw text and caret (round the coordinates so the caret falls on a pixel)
 	text = convertLatexShortcuts(originalText);
-	c.font = '20px "Times New Roman", serif';
+	c.font = '20px sans-serif';
 	var width = c.measureText(text).width;
 
-	// center the text
-	x -= width / 2;
-
-	// position the text intelligently if given an angle
-	if(angleOrNull !== null) {
-		var cos = Math.cos(angleOrNull);
-		var sin = Math.sin(angleOrNull);
-		var cornerPointX = (width / 2 + 5) * (cos > 0 ? 1 : -1);
-		var cornerPointY = (10 + 5) * (sin > 0 ? 1 : -1);
-		var slide = sin * Math.pow(Math.abs(sin), 40) * cornerPointX - cos * Math.pow(Math.abs(cos), 10) * cornerPointY;
-		x += cornerPointX - sin * slide;
-		y += cornerPointY + cos * slide;
-	}
-
-	// draw text and caret (round the coordinates so the caret falls on a pixel)
 	if('advancedFillText' in c) {
 		c.advancedFillText(text, originalText, x + width / 2, y, angleOrNull);
-	} else {
+	}
+	if (typeof boxObject.width != 'undefined') {
+		var words = text.split(' ');
+        var line = '';
+        var lineHeight = 24;
+
+        for(var n = 0; n < words.length; n++) {
+          var testLine = line + words[n] + ' ';
+          var metrics = c.measureText(testLine);
+          var testWidth = metrics.width;
+          if (testWidth > boxObject.width && n > 0) {
+            c.fillText(line, x, y);
+            line = words[n] + ' ';
+            y += lineHeight;
+          }
+          else {
+            line = testLine;
+          }
+        }
+        c.fillText(line, x, y);
+    } else {
+		// center the text
+		x -= width / 2;
+
+		// position the text intelligently if given an angle
+		if(angleOrNull !== null) {
+			var cos = Math.cos(angleOrNull);
+			var sin = Math.sin(angleOrNull);
+			var cornerPointX = (width / 2 + 5) * (cos > 0 ? 1 : -1);
+			var cornerPointY = (10 + 5) * (sin > 0 ? 1 : -1);
+			var slide = sin * Math.pow(Math.abs(sin), 40) * cornerPointX - cos * Math.pow(Math.abs(cos), 10) * cornerPointY;
+			x += cornerPointX - sin * slide;
+			y += cornerPointY + cos * slide;
+		}
 		x = Math.round(x);
 		y = Math.round(y);
 		c.fillText(text, x, y + 6);
@@ -78,6 +97,7 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
 			c.stroke();
 		}
 	}
+
 }
 
 var caretTimer;
@@ -105,6 +125,7 @@ var hitTargetPadding = 6; // pixels
 var selectedObject = null; // either a Link or a Node
 var currentLink = null; // a Link
 var movingObject = false;
+var resizingObject = false;
 var originalClick;
 
 function drawUsing(c) {
@@ -170,7 +191,22 @@ window.onload = function() {
 	context = canvas.getContext('2d');
 	trackTransforms(context);
 	restoreBackup();
+	context.setTransform(1, 0, 0, 1, canvas.width*0.5, canvas.height*0.5);
 	draw();
+	var inp = document.getElementById('liveChange');
+	var origin = document.getElementById('origin');
+
+	inp.oninput = function(e) {
+		if(selectedObject !== null) {
+			selectedObject.text = inp.value;
+			draw();
+		}
+	};
+	origin.onclick = function(e) {
+		var currentScale = context.getTransform().a;
+		context.setTransform(currentScale, 0, 0, currentScale, canvas.width*0.5, canvas.height*0.5);
+		draw();
+	};
 
 	canvas.onmousedown = function(e) {
 		var mouse = crossBrowserMousePos(e);
@@ -179,19 +215,23 @@ window.onload = function() {
 		originalClick = mouse;
 
 		if(selectedObject !== null) {
-			if(shift && selectedObject instanceof Node) {
-				currentLink = new SelfLink(selectedObject, mouse);
-			} else {
-				movingObject = true;
-				deltaMouseX = deltaMouseY = 0;
-				if(selectedObject.setMouseStart) {
+			if (selectedObject instanceof Node) {
+				if(shift)  {
+					currentLink = new TemporaryLink(mouse, mouse);
+				} else {
 					selectedObject.setMouseStart(mouse.x, mouse.y);
+					deltaMouseX = deltaMouseY = 0;
+					if (selectedObject.isResizing()) {
+						resizingObject = true;
+					} else {
+						movingObject = true;
+						inp.value = selectedObject.text;
+					}
 				}
 			}
 			resetCaret();
-		} else if(shift) {
-			currentLink = new TemporaryLink(mouse, mouse);
 		} else {
+			inp.value = "";
 			mouseDown = true;
 		}
 
@@ -219,6 +259,11 @@ window.onload = function() {
 		} else if(selectedObject instanceof Node) {
 			selectedObject.isAcceptState = !selectedObject.isAcceptState;
 			draw();
+		} else if (selectedObject instanceof Link) {
+			var tmp = selectedObject.nodeA;
+			selectedObject.nodeA = selectedObject.nodeB;
+			selectedObject.nodeB = tmp;
+			draw();
 		}
 	};
 
@@ -231,19 +276,13 @@ window.onload = function() {
 				targetNode = null;
 			}
 
-			if(selectedObject === null) {
+			if(selectedObject !== null) {
 				if(targetNode !== null) {
-					currentLink = new StartLink(targetNode, originalClick);
+					if (targetNode != selectedObject) {
+						currentLink = new Link(selectedObject, targetNode);
+					}
 				} else {
-					currentLink = new TemporaryLink(originalClick, mouse);
-				}
-			} else {
-				if(targetNode == selectedObject) {
-					currentLink = new SelfLink(selectedObject, mouse);
-				} else if(targetNode !== null) {
-					currentLink = new Link(selectedObject, targetNode);
-				} else {
-					currentLink = new TemporaryLink(selectedObject.closestPointOnCircle(mouse.x, mouse.y), mouse);
+					currentLink = new TemporaryLink(selectedObject.closestPoint(mouse.x, mouse.y), mouse);
 				}
 			}
 			draw();
@@ -252,6 +291,9 @@ window.onload = function() {
 			if(selectedObject instanceof Node) {
 				snapNode(selectedObject);
 			}
+			draw();
+		} else if (resizingObject) {
+			selectedObject.resizeObject(mouse.x, mouse.y);
 			draw();
 		} else if (mouseDown) {
 			var newX = mouse.x-originalClick.x;
@@ -264,6 +306,7 @@ window.onload = function() {
 
 	canvas.onmouseup = function(e) {
 		movingObject = false;
+		resizingObject = false;
 		mouseDown = false;
 
 		if(currentLink !== null) {
@@ -289,7 +332,7 @@ window.onload = function() {
 		var mouse = crossBrowserMousePos(e);
 		var delta = e.wheelDelta ? e.wheelDelta/40 : e.detail ? -e.detail : 0;
 		var currentScale = context.getTransform().a;
-		if (delta > 0 && currentScale < 5 || delta < 0 && currentScale > 0.2) {
+		if (delta > 0 && currentScale < 4 || delta < 0 && currentScale > 0.2) {
 			zoom(delta, mouse);
 		}
 		return e.preventDefault() && false;
@@ -360,7 +403,7 @@ window.onload = function() {
 		el.addEventListener('dragstart', function (e) {
 	 		if(currentLink === null) {
 	      		e.dataTransfer.effectAllowed = 'copy'; // only dropEffect='copy' will be dropable
-	      		e.dataTransfer.setData('Text', this.textContent); // required otherwise doesn't work
+	      		e.dataTransfer.setData('Type', this.textContent); // required otherwise doesn't work
 	      		return false;
 	      	}
 	    });
@@ -379,7 +422,11 @@ window.onload = function() {
 	    	if (e.stopPropagation) e.stopPropagation(); // stops the browser from redirecting...why???
 	    	var mouse = crossBrowserMousePos(e);
 			var selectedObject = new Node(mouse.x, mouse.y);
-			selectedObject.text = e.dataTransfer.getData('Text');
+			var tmp = e.dataTransfer.getData('Type');
+			selectedObject.text = tmp;
+			if (tmp == "Answer") {
+				selectedObject.isAcceptState = true;
+			}
 			nodes.push(selectedObject);
 			resetCaret();
 			draw();
@@ -488,7 +535,7 @@ function saveAsSVG() {
 	var svgData = exporter.toSVG();
 	output(svgData);
 	// Chrome isn't ready for this yet, the 'Save As' menu item is disabled
-	// document.location.href = 'data:image/svg+xml;base64,' + btoa(svgData);
+	document.location.href = 'data:image/svg+xml;base64,' + btoa(svgData);
 }
 
 function saveAsLaTeX() {
